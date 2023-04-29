@@ -11,6 +11,7 @@ import (
 	"log"
 	"mime"
 	"net/http"
+	url2 "net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -32,6 +33,8 @@ func main() {
 	flag.StringVar(&allowDomains, "allow-domains", "", "allow domains (comma separated)")
 
 	flag.Parse()
+
+	log.Printf("allow domains: %s", strings.Split(allowDomains, ","))
 	if err := serve(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return
@@ -48,12 +51,19 @@ func serve() error {
 				return
 			}
 			url := r.URL.Query().Get("url")
+			targetURL, err := url2.Parse(url)
+			if err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				fmt.Fprintln(w, "Invalid url")
+				return
+			}
+
 			width, _ := strconv.Atoi(r.URL.Query().Get("w"))
 			quality, _ := strconv.Atoi(r.URL.Query().Get("q"))
 
-			if allowDomains != "" && !strings.Contains(allowDomains, "") {
-				fmt.Fprintln(w, "Domain not allowed")
+			if allowDomains != "" && !strings.Contains(allowDomains, targetURL.Host) {
 				w.WriteHeader(http.StatusForbidden)
+				fmt.Fprintln(w, "Domain not allowed")
 				return
 			}
 			mimeType, _, _ := mime.ParseMediaType(r.Header.Get("Accept"))
