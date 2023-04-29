@@ -13,4 +13,4 @@ RUN go mod download
 ADD . .
 RUN go build -trimpath -o ./main -ldflags "-w -s -extldflags " ./main.go
 
-ENTRYPOINT ["/main"]
+CMD ["./main"]
