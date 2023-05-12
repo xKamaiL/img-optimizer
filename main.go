@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
@@ -97,9 +98,9 @@ func serve() error {
 			}
 			defer res.Body.Close()
 			defer io.Copy(io.Discard, res.Body)
+			var buf bytes.Buffer
 
-			buf, err := io.ReadAll(res.Body)
-			if err != nil {
+			if _, err := io.Copy(&buf, res.Body); err != nil {
 				fmt.Fprintln(w, "cannot read byte upstream response")
 				return
 			}
