@@ -105,7 +105,7 @@ func serve() error {
 				return
 			}
 			maxAge := getMaxAge(res.Header.Get("Cache-Control"))
-			metadata, err := bimg.NewImage(buf).Metadata()
+			metadata, err := bimg.NewImage(buf.Bytes()).Metadata()
 			if err != nil {
 				fmt.Fprintln(w, "cannot get metadata")
 				return
@@ -115,7 +115,7 @@ func serve() error {
 			if metadata.Size.Width > width {
 				reWidth = width
 			}
-			resizeImg, err := bimg.Resize(buf, bimg.Options{
+			resizeImg, err := bimg.Resize(buf.Bytes(), bimg.Options{
 				Quality: quality,
 				Width:   reWidth,
 				Type:    bimg.WEBP,
