@@ -56,7 +56,7 @@ func serve() error {
 			}
 			srcURL := r.URL.Query().Get("url")
 			// check url
-			if !strings.HasPrefix(srcURL, "http") {
+			if !strings.HasPrefix(srcURL, "http") && baseURL != "" {
 				joinURL, err := url.JoinPath(baseURL, srcURL)
 				if err != nil {
 					w.WriteHeader(http.StatusBadRequest)
