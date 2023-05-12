@@ -211,7 +211,8 @@ func getMaxAge(str string) int {
 	ageStr = strings.Trim(ageStr, "\"")
 	age, err := strconv.Atoi(ageStr)
 	if err != nil {
-		return 0
+		log.Printf("warning cannot parse max-age: %s", err)
+		return 604800 // default cache control
 	}
 	return age
 }
