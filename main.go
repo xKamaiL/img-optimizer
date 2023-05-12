@@ -11,7 +11,7 @@ import (
 	"log"
 	"mime"
 	"net/http"
-	url2 "net/url"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -27,10 +27,12 @@ type arrayFlags []string
 
 var (
 	allowDomains string
+	baseURL      string
 )
 
 func main() {
 	flag.StringVar(&allowDomains, "allow-domains", "", "allow domains (comma separated)")
+	flag.StringVar(&baseURL, "base-url", "", "base url when url isn't start with http(s)://")
 
 	flag.Parse()
 
@@ -50,8 +52,18 @@ func serve() error {
 				w.WriteHeader(http.StatusMethodNotAllowed)
 				return
 			}
-			url := r.URL.Query().Get("url")
-			targetURL, err := url2.Parse(url)
+			srcURL := r.URL.Query().Get("url")
+			// check url
+			if !strings.HasPrefix(srcURL, "http") {
+				joinURL, err := url.JoinPath(baseURL, srcURL)
+				if err != nil {
+					w.WriteHeader(http.StatusBadRequest)
+					fmt.Fprintln(w, "Invalid url: "+err.Error())
+					return
+				}
+				srcURL = joinURL
+			}
+			targetURL, err := url.Parse(srcURL)
 			if err != nil {
 				w.WriteHeader(http.StatusBadRequest)
 				fmt.Fprintln(w, "Invalid url")
