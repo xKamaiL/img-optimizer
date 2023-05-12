@@ -23,8 +23,9 @@ import (
 	"github.com/moonrhythm/parapet/pkg/router"
 )
 
-type arrayFlags []string
-
+var httpClient = http.Client{
+	Timeout: 1 * time.Second,
+}
 var (
 	allowDomains string
 	baseURL      string
@@ -80,7 +81,7 @@ func serve() error {
 			}
 			mimeType, _, _ := mime.ParseMediaType(r.Header.Get("Accept"))
 
-			cacheKey := getCacheKey(url, width, quality, mimeType)
+			cacheKey := getCacheKey(srcURL, width, quality, mimeType)
 
 			// check from cache ?
 			bufFromCache, err2 := readImageFileSystem(w, cacheKey, "./cache")
@@ -89,7 +90,7 @@ func serve() error {
 				return
 			}
 
-			res, err := http.Get(url)
+			res, err := httpClient.Get(srcURL)
 			if err != nil {
 				fmt.Fprintln(w, "cannot get upstream url")
 				return
