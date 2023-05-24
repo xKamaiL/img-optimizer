@@ -2,19 +2,14 @@ package main
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/base64"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"io/fs"
 	"log"
 	"mime"
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -25,11 +20,16 @@ import (
 )
 
 var httpClient = http.Client{
-	Timeout: 1 * time.Second,
+	Timeout: 2 * time.Second,
 }
+
+const cacheVersion = 1
+
 var (
+	// allowDomains is comma separated list of allowed domains
 	allowDomains string
-	baseURL      string
+	// baseURL is base url when url isn't start with http(s)://
+	baseURL string
 )
 
 func main() {
@@ -54,63 +54,79 @@ func serve() error {
 				w.WriteHeader(http.StatusMethodNotAllowed)
 				return
 			}
+
 			srcURL := r.URL.Query().Get("url")
-			// check url
+			if srcURL == "" {
+				http.Error(w, "url is required", http.StatusBadRequest)
+				return
+			}
+
+			// detect leading url and if base url is set
 			if !strings.HasPrefix(srcURL, "http") && baseURL != "" {
 				joinURL, err := url.JoinPath(baseURL, srcURL)
 				if err != nil {
-					w.WriteHeader(http.StatusBadRequest)
-					fmt.Fprintln(w, "Invalid url: "+err.Error())
+					http.Error(w, "invalid image url", http.StatusBadRequest)
 					return
 				}
 				srcURL = joinURL
 			}
+
 			targetURL, err := url.Parse(srcURL)
 			if err != nil {
-				w.WriteHeader(http.StatusBadRequest)
-				fmt.Fprintln(w, "Invalid url")
+				http.Error(w, "invalid image url", http.StatusBadRequest)
 				return
 			}
 
 			width, _ := strconv.Atoi(r.URL.Query().Get("w"))
 			quality, _ := strconv.Atoi(r.URL.Query().Get("q"))
 
+			// filter domain
 			if allowDomains != "" && !strings.Contains(allowDomains, targetURL.Host) {
 				w.WriteHeader(http.StatusForbidden)
 				fmt.Fprintln(w, "Domain not allowed")
 				return
 			}
-			mimeType, _, _ := mime.ParseMediaType(r.Header.Get("Accept"))
 
+			mimeType, _, _ := mime.ParseMediaType(r.Header.Get("Accept"))
+			// generate cache key
 			cacheKey := getCacheKey(srcURL, width, quality, mimeType)
 
-			// check from cache ?
-			bufFromCache, err2 := readImageFileSystem(w, cacheKey, "./cache")
-			if err2 == nil && bufFromCache != nil {
-				w.Write(bufFromCache)
+			// try to read from cache
+			if res, err := readImageFileSystem(cacheKey, "./cache"); err == nil && res != nil {
+				sendResponse(w, res, CacheHit, nil)
 				return
 			}
 
 			res, err := httpClient.Get(srcURL)
 			if err != nil {
-				fmt.Fprintln(w, "cannot get upstream url")
+				http.Error(w, "cannot get image from upstream", http.StatusInternalServerError)
 				return
 			}
+
 			defer res.Body.Close()
 			defer io.Copy(io.Discard, res.Body)
+			// we only cache response
+			if res.StatusCode >= http.StatusBadRequest {
+				http.Error(w, "cannot get image from upstream", http.StatusInternalServerError)
+				return
+			}
+
 			var buf bytes.Buffer
 
 			if _, err := io.Copy(&buf, res.Body); err != nil {
-				fmt.Fprintln(w, "cannot read byte upstream response")
-				return
-			}
-			maxAge := getMaxAge(res.Header.Get("Cache-Control"))
-			metadata, err := bimg.NewImage(buf.Bytes()).Metadata()
-			if err != nil {
-				fmt.Fprintln(w, "cannot get metadata")
+				http.Error(w, "cannot read image from upstream", http.StatusInternalServerError)
 				return
 			}
 
+			maxAge := getMaxAge(res.Header.Get("Cache-Control"))
+
+			metadata, err := bimg.NewImage(buf.Bytes()).Metadata()
+			if err != nil {
+				http.Error(w, "cannot read image metadata", http.StatusInternalServerError)
+				return
+			}
+
+			// when width is not set, use the original width
 			reWidth := 0
 			if metadata.Size.Width > width {
 				reWidth = width
@@ -121,10 +137,15 @@ func serve() error {
 				Type:    bimg.WEBP,
 			})
 			if err != nil {
-				fmt.Fprintln(w, "cannot resize image")
+				http.Error(w, "cannot resize image", http.StatusInternalServerError)
 				return
 			}
-			//defer fmt.Printf("resize image %d bytes, url = %s, cache = %s\n", len(resizeImg), url, cacheKey)
+
+			upstreamContentType := http.DetectContentType(buf.Bytes())
+			// if an upstream content type is application/octet-stream, use a content type from header
+			if upstreamContentType == "application/octet-stream" {
+				upstreamContentType = res.Header.Get("Content-Type")
+			}
 
 			go func() {
 				err := writeImageToFile(cacheKey, maxAge, getHash(resizeImg), resizeImg)
@@ -133,12 +154,12 @@ func serve() error {
 				}
 			}()
 
-			w.Header().Set("Content-Length", strconv.Itoa(len(resizeImg)))
-			w.Header().Set("Cache-Control", fmt.Sprintf("max-age=%d", maxAge))
-			w.WriteHeader(http.StatusOK)
-			w.Write(resizeImg)
-
-			// do we have to defer ?
+			sendResponse(w, &Response{
+				buf:         buf.Bytes(),
+				ContentType: upstreamContentType,
+				MaxAge:      maxAge,
+				ETag:        getHash(buf.Bytes()),
+			}, "", nil)
 
 		})
 	}))
@@ -150,38 +171,21 @@ func serve() error {
 
 func getCacheKey(url string, w int, q int, mimeType string) string {
 	return getHash(
-		1, url, w, q, mimeType,
+		cacheVersion, url, w, q, mimeType,
 	)
 }
 
-func writeImageToFile(cacheKey string, maxAge int, etag string, buf []byte) error {
-	// get extension from content type
-	ext, err := mime.ExtensionsByType("image/webp")
+func getMaxAge(str string) int {
+	cacheControl := parseCacheControl(str)
+	ageStr := cacheControl["s-maxage"]
+	if ageStr == "" {
+		ageStr = cacheControl["max-age"]
+	}
+	age, err := strconv.Atoi(strings.Trim(ageStr, "\""))
 	if err != nil {
-		return err
+		return 604800 // default cache control
 	}
-	dir := filepath.Join("./cache", cacheKey)
-
-	fileName := fmt.Sprintf("%d.%+v.%s%s", maxAge, int64(maxAge)+time.Now().Unix(), etag, ext[0])
-	log.Printf("write image to file %s", fileName)
-	targetFilePath := filepath.Join(dir, fileName)
-
-	// Create the target directory if it does not exist
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		if err := os.MkdirAll(dir, fs.ModePerm); err != nil {
-			return err
-		}
-	}
-	// Write the image buffer to the target file
-	f, err := os.Create(targetFilePath)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	if _, err := f.Write(buf); err != nil {
-		return err
-	}
-	return nil
+	return age
 }
 
 func parseCacheControl(str string) map[string]string {
@@ -200,79 +204,4 @@ func parseCacheControl(str string) map[string]string {
 		m[key] = value
 	}
 	return m
-}
-
-func getMaxAge(str string) int {
-	cacheControl := parseCacheControl(str)
-	ageStr := cacheControl["s-maxage"]
-	if ageStr == "" {
-		ageStr = cacheControl["max-age"]
-	}
-	ageStr = strings.Trim(ageStr, "\"")
-	age, err := strconv.Atoi(ageStr)
-	if err != nil {
-		log.Printf("warning cannot parse max-age: %s", err)
-		return 604800 // default cache control
-	}
-	return age
-}
-
-func getHash(items ...interface{}) string {
-	hash := sha256.New()
-	for _, item := range items {
-		switch v := item.(type) {
-		case string:
-			hash.Write([]byte(v))
-		case int:
-			hash.Write([]byte(strconv.Itoa(v)))
-		case []byte:
-			hash.Write(v)
-		default:
-			// do nothing
-		}
-	}
-	hashBytes := hash.Sum(nil)
-	// See https://en.wikipedia.org/wiki/Base64#Filenames
-	hashString := base64.URLEncoding.EncodeToString(hashBytes)
-	return hashString
-}
-
-func readImageFileSystem(w http.ResponseWriter, cacheKey string, cacheDirectory string) ([]byte, error) {
-	now := time.Now().Unix()
-
-	requestedDirectory := filepath.Join(cacheDirectory, cacheKey)
-	files, err := os.ReadDir(requestedDirectory)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, file := range files {
-		//  14400.790149400.lb8rhuuM92bhYv2KvdczyjnmOqtYouQLs6UF_uHFHGY=.webp
-		// [max-age, expired_at, etag, ext]
-		fileName := file.Name()
-		ext := filepath.Ext(fileName)
-		if ext == "" {
-			log.Printf("warning: invalid file name: %s", fileName)
-			continue
-		}
-		parts := strings.Split(fileName[:len(fileName)-len(ext)], ".")
-		if len(parts) < 3 {
-			log.Printf("warning: invalid file name: %s", fileName)
-			continue
-		}
-		expireAtString := parts[1]
-		filePath := filepath.Join(requestedDirectory, fileName)
-
-		expireAt, err := strconv.ParseInt(expireAtString, 10, 64)
-		if err != nil {
-			continue
-		}
-		if expireAt < now {
-			go os.Remove(filePath)
-			return nil, errors.New("not found")
-		}
-		return os.ReadFile(filePath)
-	}
-
-	return nil, nil
 }
