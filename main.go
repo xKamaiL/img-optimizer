@@ -141,12 +141,6 @@ func serve() error {
 				return
 			}
 
-			upstreamContentType := http.DetectContentType(buf.Bytes())
-			// if an upstream content type is application/octet-stream, use a content type from header
-			if upstreamContentType == "application/octet-stream" {
-				upstreamContentType = res.Header.Get("Content-Type")
-			}
-
 			go func() {
 				err := writeImageToFile(cacheKey, maxAge, getHash(resizeImg), resizeImg)
 				if err != nil {
@@ -155,10 +149,9 @@ func serve() error {
 			}()
 
 			sendResponse(w, &Response{
-				buf:         buf.Bytes(),
-				ContentType: upstreamContentType,
-				MaxAge:      maxAge,
-				ETag:        getHash(buf.Bytes()),
+				buf:    buf.Bytes(),
+				MaxAge: maxAge,
+				ETag:   getHash(buf.Bytes()),
 			}, "", nil)
 
 		})

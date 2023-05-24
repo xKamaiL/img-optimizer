@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io/fs"
 	"mime"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -76,10 +75,9 @@ func readImageFileSystem(cacheKey string, cacheDirectory string) (*Response, err
 		}
 
 		return &Response{
-			buf:         buf,
-			ContentType: http.DetectContentType(buf),
-			MaxAge:      metadata.MaxAge,
-			ETag:        metadata.Etag,
+			buf:    buf,
+			MaxAge: metadata.MaxAge,
+			ETag:   metadata.Etag,
 		}, nil
 	}
 
