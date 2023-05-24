@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
 )
@@ -23,8 +22,7 @@ type Response struct {
 
 func sendResponse(w http.ResponseWriter, res *Response, cache CacheKind, extraHeaders map[string]string) {
 	defer w.(http.Flusher).Flush()
-	log.Printf("Cache: %s", cache)
-	maxAge := res.MaxAge / 1000
+	maxAge := res.MaxAge
 
 	w.Header().Set("Vary", "Accept")
 	w.Header().Set("Content-Type", res.ContentType)
