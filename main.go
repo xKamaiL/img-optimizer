@@ -93,7 +93,7 @@ func serve() error {
 
 			// try to read from cache
 			if res, err := readImageFileSystem(cacheKey, "./cache"); err == nil && res != nil {
-				sendResponse(w, res, CacheHit, nil)
+				sendResponse(w, res, CacheHit, nil, r)
 				return
 			}
 
@@ -152,7 +152,7 @@ func serve() error {
 				buf:    buf.Bytes(),
 				MaxAge: maxAge,
 				ETag:   getHash(buf.Bytes()),
-			}, "", nil)
+			}, "", nil, r)
 
 		})
 	}))

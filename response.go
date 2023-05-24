@@ -20,8 +20,12 @@ type Response struct {
 	ETag   string
 }
 
-func sendResponse(w http.ResponseWriter, res *Response, cache CacheKind, extraHeaders map[string]string) {
-	defer w.(http.Flusher).Flush()
+func sendResponse(w http.ResponseWriter, res *Response, cache CacheKind, extraHeaders map[string]string, r *http.Request) {
+	w.Header().Set("Etag", res.ETag)
+	if checkPreconditions(w, r) {
+		return
+	}
+
 	maxAge := res.MaxAge
 
 	w.Header().Add("Vary", "Accept")
@@ -36,7 +40,7 @@ func sendResponse(w http.ResponseWriter, res *Response, cache CacheKind, extraHe
 	w.Header().Set("Expires", time.Now().Add(time.Duration(maxAge)*time.Second).Format(http.TimeFormat))
 	w.Header().Set("Content-Security-Policy", "script-src 'none'; frame-src 'none'; sandbox;")
 	w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload")
-	w.Header().Set("etag", res.ETag)
+
 	w.Header().Set("X-SveltekitImage-Cache", string(cache))
 
 	w.Write(res.buf)
