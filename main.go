@@ -16,6 +16,7 @@ import (
 
 	"github.com/h2non/bimg"
 	"github.com/moonrhythm/parapet"
+	"github.com/moonrhythm/parapet/pkg/cors"
 	"github.com/moonrhythm/parapet/pkg/router"
 )
 
@@ -47,6 +48,7 @@ func main() {
 
 func serve() error {
 	s := parapet.NewFrontend()
+	s.Use(cors.New())
 	r := router.New()
 	r.Handle("/", parapet.MiddlewareFunc(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
