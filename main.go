@@ -46,7 +46,7 @@ func main() {
 }
 
 func serve() error {
-	s := parapet.NewBackend()
+	s := parapet.NewFrontend()
 	r := router.New()
 	r.Handle("/", parapet.MiddlewareFunc(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -54,6 +54,8 @@ func serve() error {
 				w.WriteHeader(http.StatusMethodNotAllowed)
 				return
 			}
+			// set cross-origin
+			w.Header().Set("Cross-Origin-Resource-Policy", "cross-origin")
 
 			srcURL := r.URL.Query().Get("url")
 			if srcURL == "" {
