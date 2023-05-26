@@ -1,8 +1,9 @@
 # Image Optimization HTTP Service
 
 
-## Usage
 
+## Usage
+Docker `xkamail/img`
 ```
 https://<your deploy url>/?url=<url of image>&w=<width>&q=<quality>
 ```
